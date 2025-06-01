@@ -1,41 +1,67 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split, learning_curve
 from xgboost import XGBClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import numpy as np
 import joblib
 
-# === 1. Load Dataset ===
-df = pd.read_csv("metadata_custom_multilabel.csv")
+# Load dataset
+df = pd.read_csv("dataset packer - metadata.csv")
 df["packer_type"] = df["packer_type"].astype(int)
-
-# === 2. Prepare Features and Labels ===
 X = df.drop(columns=["file_path", "packer_type"])
 y = df["packer_type"]
 
-# === 3. Stratified Train-Test Split ===
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, stratify=y, random_state=42
-)
+# Standardize features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-# === 4. Define and Train XGBoost Model ===
-xgb_model = XGBClassifier(
-    objective="multi:softmax",           # for multiclass classification
-    num_class=25,                        # total number of classes (0–24)
-    eval_metric="mlogloss",             # multiclass log loss
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, stratify=y, test_size=0.2, random_state=42)
+
+# Train model
+model = XGBClassifier(
+    objective='multi:softprob',
+    num_class=len(y.unique()),
+    eval_metric='mlogloss',
     use_label_encoder=False,
+    n_estimators=50,
+    max_depth=6,
+    learning_rate=0.1,
     random_state=42
 )
-xgb_model.fit(X_train, y_train)
+model.fit(X_train, y_train)
 
-# === 5. Predict and Evaluate ===
-y_pred = xgb_model.predict(X_test)
+# Predict
+y_pred = model.predict(X_test)
 
-print("\n Confusion Matrix:")
-print(confusion_matrix(y_test, y_pred, labels=list(range(25))))
+# Evaluate
+print("=== XGBoost ===")
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Classification Report:\n", classification_report(y_test, y_pred, digits=4, zero_division=0))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
 
-print("\n Classification Report:")
-print(classification_report(y_test, y_pred, labels=list(range(25)), zero_division=0))
+# Save model
+joblib.dump(model, "xgboost_packer_model.pkl")
 
-# === 6. Save the Trained Model ===
-joblib.dump(xgb_model, "xgb_multiclass_packer_model.pkl")
-print("\n XGBoost model saved as 'xgb_multiclass_packer_model.pkl'")
+# === Plot Learning Curve ===
+train_sizes, train_scores, test_scores = learning_curve(
+    model, X_scaled, y, cv=3, scoring='accuracy',
+    train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
+)
+
+train_mean = np.mean(train_scores, axis=1)
+test_mean = np.mean(test_scores, axis=1)
+
+plt.figure(figsize=(10, 6))
+plt.plot(train_sizes, train_mean, 'o-', label="Training Score")
+plt.plot(train_sizes, test_mean, 'o--', label="Validation Score")
+plt.title("Learning Curve - XGBoost")
+plt.xlabel("Number of Training Samples")
+plt.ylabel("Accuracy")
+plt.legend(loc="lower right")
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("xgboost_learning_curve.png")
+plt.show()
