@@ -15,21 +15,40 @@ def extract_features(file_path):
     try:
         pe = pefile.PE(file_path)
         entropy = pe.sections[0].get_entropy()
-        virtual_size = pe.sections[0].Misc_VirtualSize
-        raw_size = pe.sections[0].SizeOfRawData
-        number_of_sections = len(pe.sections)
         file_size = os.path.getsize(file_path)
-        # Add more features based on your final dataset...
-        
-        return pd.DataFrame([{
+        num_sections = len(pe.sections)
+
+        suspicious_imports = 0
+        suspicious_apis = ["LoadLibraryA", "GetProcAddress", "VirtualAlloc", "CreateProcessA"]
+        if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
+            for entry in pe.DIRECTORY_ENTRY_IMPORT:
+                for imp in entry.imports:
+                    if imp.name and imp.name.decode() in suspicious_apis:
+                        suspicious_imports += 1
+
+        features = {
             "entropy": entropy,
-            "virtual_size": virtual_size,
-            "raw_size": raw_size,
-            "number_of_sections": number_of_sections,
-            "file_size": file_size
-        }])
-    except:
+            "file_size": file_size,
+            "num_sections": num_sections,
+            "suspicious_imports": suspicious_imports,
+            "VirtualSize": pe.sections[0].Misc_VirtualSize,
+            "SizeOfImage": pe.OPTIONAL_HEADER.SizeOfImage,
+            "SizeOfHeaders": pe.OPTIONAL_HEADER.SizeOfHeaders,
+            "Relocations": len(pe.DIRECTORY_ENTRY_BASERELOC) if hasattr(pe, 'DIRECTORY_ENTRY_BASERELOC') else 0,
+            "Imports": len(pe.DIRECTORY_ENTRY_IMPORT) if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT') else 0,
+            "BaseOfCode": pe.OPTIONAL_HEADER.BaseOfCode,
+            "DllCharacteristics": pe.OPTIONAL_HEADER.DllCharacteristics,
+            "AddressOfEntryPoint": pe.OPTIONAL_HEADER.AddressOfEntryPoint,
+            "SizeOfInitializedData": pe.OPTIONAL_HEADER.SizeOfInitializedData,
+            "SizeOfUninitializedData": pe.OPTIONAL_HEADER.SizeOfUninitializedData
+        }
+
+        return pd.DataFrame([features])
+
+    except Exception as e:
+        print(f"[!] Feature extraction failed: {e}")
         return None
+
 
 # Voting function
 def hard_vote(models, X):
@@ -49,7 +68,8 @@ def browse_file():
 
     prediction = hard_vote([rf, xgb, dt], features)
     entropy = features["entropy"].values[0]
-    virtual_size = features["virtual_size"].values[0]
+    virtual_size = features["VirtualSize"].values[0]
+    print("Raw Features:\n", features)
     
     result_label.config(text=f"Packer Type: {prediction}\nEntropy: {entropy:.2f}\nVirtual Size: {virtual_size}")
 
